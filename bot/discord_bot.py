@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 import discord
 from discord.ext import commands, tasks
@@ -63,17 +64,49 @@ class DiscordChannel:
         self.id = id
         self.name = name
 
-# Initialize bot
+# Initialize bot with reconnection handling
 async def initialize_bot():
     logger.info("Initializing Discord bot...")
+    
+    # Set up reconnect settings
+    bot.max_reconnect_attempts = 50  # Very high to ensure it keeps trying
     
     @bot.event
     async def on_ready():
         logger.info(f'Logged in as {bot.user}!')
         await register_commands()
         check_pending_purchases.start()
+        logger.info("Bot is fully operational and commands are registered")
         
-    await bot.start(DISCORD_BOT_TOKEN)
+    @bot.event
+    async def on_disconnect():
+        logger.warning("Bot disconnected from Discord. Will attempt to reconnect...")
+        
+    @bot.event
+    async def on_connect():
+        logger.info("Bot connected to Discord")
+    
+    @bot.event
+    async def on_resumed():
+        logger.info("Bot session resumed after a disconnect")
+    
+    @bot.event
+    async def on_error(event, *args, **kwargs):
+        logger.error(f"Error in event {event}: {args} {kwargs}")
+        error = sys.exc_info()
+        if error:
+            logger.error(f"Error details: {error[0].__name__}: {error[1]}")
+            
+    # Start bot with reconnect=True to auto-reconnect on network issues
+    try:
+        await bot.start(DISCORD_BOT_TOKEN, reconnect=True)
+    except Exception as e:
+        logger.critical(f"Failed to start bot: {e}")
+        # Try restarting after a delay
+        logger.info("Attempting to restart bot in 30 seconds...")
+        await asyncio.sleep(30)
+        # Recursively try to initialize again
+        await initialize_bot()
 
 # Register slash commands
 async def register_commands():

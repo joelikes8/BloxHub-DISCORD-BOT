@@ -1,4 +1,6 @@
 import os
+import sys
+import time
 import asyncio
 import logging
 from flask import Flask, jsonify, request, send_from_directory
@@ -51,28 +53,77 @@ async def start_bot():
         logger.error(f"Error starting bot: {e}")
         return None
 
-# Set up the event loop for the bot
-if not os.environ.get('DISCORD_BOT_TOKEN'):
-    print("WARNING: DISCORD_BOT_TOKEN not set. Bot will not start.")
-else:
-    # Run the bot initialization in a background task
+# Watchdog function to monitor bot health
+def create_bot_watchdog():
+    """
+    Creates a watchdog timer to check if the bot is running properly
+    and restart it if necessary.
+    """
+    def check_bot_health():
+        """Watchdog function that checks bot health every minute"""
+        global bot_thread, loop
+        
+        while True:
+            # Sleep for a minute
+            time.sleep(60)
+            
+            # Check if bot thread is alive
+            if not bot_thread.is_alive():
+                logger.critical("Bot thread is not alive! Restarting bot...")
+                # Create a new thread
+                start_bot_with_watchdog()
+            else:
+                logger.debug("Bot watchdog: Bot thread is alive")
+
+    # Create and start watchdog thread
+    watchdog_thread = threading.Thread(target=check_bot_health)
+    watchdog_thread.daemon = True
+    watchdog_thread.start()
+    logger.info("Bot watchdog started")
+
+# Function to start the bot with all necessary setup
+def start_bot_with_watchdog():
+    """Start the bot with watchdog monitoring"""
+    global bot_thread, loop
+    
+    if not os.environ.get('DISCORD_BOT_TOKEN'):
+        logger.warning("DISCORD_BOT_TOKEN not set. Bot will not start.")
+        return
+        
+    # Create a new event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
+    # Start the bot
     bot_future = loop.run_until_complete(start_bot())
     
-    # Create a separate thread to run the loop
+    # Define the loop runner
     def run_bot_loop():
         try:
             loop.run_forever()
         except Exception as e:
-            print(f"Bot loop error: {e}")
-        finally:
-            loop.close()
-    
+            logger.error(f"Bot loop error: {e}")
+            # Don't close the loop here as we want the watchdog to restart
+        
+    # Create and start the bot thread
     bot_thread = threading.Thread(target=run_bot_loop)
     bot_thread.daemon = True
     bot_thread.start()
-    print("Discord bot started in background thread")
+    logger.info("Discord bot started in background thread")
+
+# Set up global variables
+bot_thread = None
+loop = None
+
+# Start the bot if TOKEN is set
+if os.environ.get('DISCORD_BOT_TOKEN'):
+    # Start the bot
+    start_bot_with_watchdog()
+    
+    # Start the watchdog after a delay to ensure bot had time to connect
+    threading.Timer(10, create_bot_watchdog).start()
+else:
+    print("WARNING: DISCORD_BOT_TOKEN not set. Bot will not start.")
 
 # API routes
 @app.route('/api/products', methods=['GET'])
