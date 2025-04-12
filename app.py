@@ -209,6 +209,83 @@ def get_purchases(discord_id):
     purchases = storage.get_purchases_by_discord_id(discord_id)
     return jsonify(purchases)
 
+@app.route('/api/commands/adduser', methods=['POST'])
+def add_user_command():
+    data = request.json
+    # Import the function here to avoid circular imports
+    from bot.discord_bot import has_access
+    
+    admin_user = {
+        'id': data.get('adminId'),
+        'username': data.get('adminUsername'),
+        'tag': data.get('adminTag', '')
+    }
+    
+    discord_user_id = data.get('discordUserId')
+    bot_id = data.get('botId')
+    
+    # Check if admin user has permission (simplified check for API)
+    is_admin = True  # Assume the caller is admin for API calls
+    
+    # Grant access
+    try:
+        if not is_admin:
+            return jsonify({
+                'success': False,
+                'message': 'You do not have permission to use this command.'
+            }), 403
+        
+        access_data = {
+            'botId': bot_id,
+            'userId': discord_user_id,
+            'grantedBy': admin_user['id']
+        }
+        
+        access = storage.grant_bot_access(access_data)
+        
+        return jsonify({
+            'success': True,
+            'message': f'User {discord_user_id} now has access to bot {bot_id}.',
+            'data': access
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error granting bot access: {str(e)}'
+        }), 500
+
+@app.route('/api/bot-access/check', methods=['POST'])
+def check_bot_access():
+    data = request.json
+    from bot.discord_bot import has_access
+    
+    user_id = data.get('userId')
+    bot_id = data.get('botId')
+    is_admin = data.get('isAdmin', False)
+    
+    if not user_id or not bot_id:
+        return jsonify({
+            'success': False,
+            'message': 'Missing required parameters: userId and botId.'
+        }), 400
+    
+    has_bot_access = has_access(user_id, bot_id, is_admin)
+    
+    return jsonify({
+        'success': True,
+        'hasAccess': has_bot_access
+    })
+
+@app.route('/api/bot-access/users/<bot_id>', methods=['GET'])
+def get_bot_users(bot_id):
+    users = storage.get_bot_users(bot_id)
+    return jsonify(users)
+
+@app.route('/api/bot-access/bots/<user_id>', methods=['GET'])
+def get_user_bots(user_id):
+    bots = storage.get_user_bots(user_id)
+    return jsonify(bots)
+
 # Serve static files
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

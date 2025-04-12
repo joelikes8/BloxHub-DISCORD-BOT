@@ -3,7 +3,7 @@ import logging
 import datetime
 import json
 from typing import Dict, List, Any, Optional, Union
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, Session
 
@@ -136,6 +136,29 @@ class PrivateChannel(Base):
             'channelId': self.channel_id,
             'channelName': self.channel_name,
             'gamepassId': self.gamepass_id,
+            'createdAt': self.created_at.isoformat() if self.created_at else None
+        }
+
+class BotAccess(Base):
+    __tablename__ = 'bot_access'
+    
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(String(255), nullable=False)
+    user_id = Column(String(255), nullable=False)
+    granted_by = Column(String(255), nullable=False)  # Discord ID of admin who granted access
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    # Create a unique constraint to prevent duplicates
+    __table_args__ = (
+        UniqueConstraint('bot_id', 'user_id', name='unique_bot_user_access'),
+    )
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'botId': self.bot_id,
+            'userId': self.user_id,
+            'grantedBy': self.granted_by,
             'createdAt': self.created_at.isoformat() if self.created_at else None
         }
 
@@ -435,6 +458,73 @@ class Storage:
         session.delete(channel)
         session.commit()
         return True
+
+# Bot Access methods
+    def grant_bot_access(self, access_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Grant a user access to a bot."""
+        session = self.get_session()
+        
+        # Check if access already exists
+        existing = session.query(BotAccess).filter(
+            BotAccess.bot_id == access_data.get('botId'),
+            BotAccess.user_id == access_data.get('userId')
+        ).first()
+        
+        if existing:
+            return existing.to_dict()
+        
+        # Create new access
+        access = BotAccess(
+            bot_id=access_data.get('botId'),
+            user_id=access_data.get('userId'),
+            granted_by=access_data.get('grantedBy')
+        )
+        session.add(access)
+        session.commit()
+        return access.to_dict()
+    
+    def revoke_bot_access(self, bot_id: str, user_id: str) -> bool:
+        """Revoke a user's access to a bot."""
+        session = self.get_session()
+        access = session.query(BotAccess).filter(
+            BotAccess.bot_id == bot_id,
+            BotAccess.user_id == user_id
+        ).first()
+        
+        if not access:
+            return False
+        
+        session.delete(access)
+        session.commit()
+        return True
+    
+    def has_bot_access(self, user_id: str, bot_id: str) -> bool:
+        """Check if a user has access to a bot."""
+        session = self.get_session()
+        access = session.query(BotAccess).filter(
+            BotAccess.bot_id == bot_id,
+            BotAccess.user_id == user_id
+        ).first()
+        
+        return access is not None
+    
+    def get_bot_users(self, bot_id: str) -> List[Dict[str, Any]]:
+        """Get all users with access to a specific bot."""
+        session = self.get_session()
+        accesses = session.query(BotAccess).filter(
+            BotAccess.bot_id == bot_id
+        ).all()
+        
+        return [a.to_dict() for a in accesses]
+    
+    def get_user_bots(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get all bots a user has access to."""
+        session = self.get_session()
+        accesses = session.query(BotAccess).filter(
+            BotAccess.user_id == user_id
+        ).all()
+        
+        return [a.to_dict() for a in accesses]
 
 # Create a global storage instance
 storage = Storage()

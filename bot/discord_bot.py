@@ -108,6 +108,11 @@ async def register_commands():
         @app_commands.default_permissions(administrator=True)
         async def setprivatechannels(interaction: discord.Interaction, channel: discord.TextChannel, gamepass: str):
             await handle_set_private_channels_command(interaction, channel, gamepass)
+            
+        @bot.tree.command(name="adduser", description="Grant a user access to a specific bot (Admin only)")
+        @app_commands.default_permissions(administrator=True)
+        async def adduser(interaction: discord.Interaction, discord_user_id: str, bot_id: str):
+            await handle_adduser_command(interaction, discord_user_id, bot_id)
         
         # Sync commands
         guild = discord.Object(id=GUILD_ID)
@@ -325,6 +330,102 @@ async def handle_set_private_channels_command(interaction: discord.Interaction, 
         await interaction.followup.send(embeds=[embed], ephemeral=True)
     else:
         await interaction.followup.send(content=result.message, ephemeral=True)
+
+async def handle_adduser_command(interaction: discord.Interaction, discord_user_id: str, bot_id: str):
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            content="You do not have permission to use this command.",
+            ephemeral=True
+        )
+        return
+    
+    admin_user = DiscordUser(
+        id=str(interaction.user.id),
+        username=interaction.user.name,
+        tag=f"{interaction.user.name}#{interaction.user.discriminator}" if interaction.user.discriminator != '0' else interaction.user.name
+    )
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    # Add user to bot access whitelist
+    try:
+        # Validate input format
+        if not discord_user_id.isdigit():
+            await interaction.followup.send(
+                content="Invalid Discord user ID. Please provide a valid numeric ID.",
+                ephemeral=True
+            )
+            return
+            
+        # Check if the user exists in the guild
+        try:
+            guild = bot.get_guild(int(GUILD_ID))
+            member = await guild.fetch_member(int(discord_user_id))
+            if not member:
+                await interaction.followup.send(
+                    content=f"Could not find user with ID {discord_user_id} in this server.",
+                    ephemeral=True
+                )
+                return
+        except discord.errors.NotFound:
+            await interaction.followup.send(
+                content=f"Could not find user with ID {discord_user_id} in this server.",
+                ephemeral=True
+            )
+            return
+        except Exception as e:
+            logger.error(f"Error checking member existence: {e}")
+            # Continue with the flow - we'll still grant access even if we couldn't verify the member
+            
+        # Grant access to the bot
+        access_data = {
+            'botId': bot_id,
+            'userId': discord_user_id,
+            'grantedBy': admin_user.id
+        }
+        
+        access = storage.grant_bot_access(access_data)
+        
+        # Notify the user if they're in the guild
+        try:
+            # Only attempt to send DM if we successfully found the member earlier
+            guild = bot.get_guild(int(GUILD_ID))
+            if guild:
+                try:
+                    member = await guild.fetch_member(int(discord_user_id))
+                    if member:
+                        embed = discord.Embed(
+                            title="Bot Access Granted",
+                            description=f"You now have access to bot `{bot_id}`.",
+                            color=discord.Color.green()
+                        )
+                        embed.add_field(name="Granted By", value=f"<@{admin_user.id}>")
+                        embed.add_field(name="Date", value=access['createdAt'])
+                        
+                        await member.send(embed=embed)
+                except:
+                    # If we can't find the member or send the DM, just continue
+                    pass
+        except Exception as dm_error:
+            logger.error(f"Error sending DM to user {discord_user_id}: {dm_error}")
+            # The DM might fail if the user has DMs disabled, but we'll still report success
+        
+        # Send confirmation to admin
+        embed = discord.Embed(
+            title="Bot Access Granted",
+            description=f"User <@{discord_user_id}> now has access to bot `{bot_id}`.",
+            color=discord.Color.green()
+        )
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        logger.error(f"Error granting bot access: {e}")
+        await interaction.followup.send(
+            content=f"An error occurred while granting bot access: {str(e)}",
+            ephemeral=True
+        )
 
 # Button interactions handler
 @bot.event
@@ -907,6 +1008,31 @@ def handle_set_private_channels(
             success=False,
             message='An error occurred while setting up the private channel. Please try again later.'
         )
+
+# Helper function to check if a user has access to a specific bot
+def has_access(user_id: str, bot_id: str, is_admin: bool = False) -> bool:
+    """
+    Check if a user has access to a specific bot.
+    
+    Args:
+        user_id: The Discord ID of the user
+        bot_id: The ID of the bot to check access for
+        is_admin: Whether the user is an admin (optional)
+        
+    Returns:
+        bool: True if the user has access, False otherwise
+    """
+    try:
+        # Always grant access to administrators
+        if is_admin:
+            return True
+        
+        # Check if the user has been granted access to this bot
+        return storage.has_bot_access(user_id, bot_id)
+    except Exception as e:
+        logger.error(f"Error checking bot access: {e}")
+        # Default to no access on error
+        return False
 
 # Helper function to generate verification code
 def generate_verification_code() -> str:
