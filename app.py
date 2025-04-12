@@ -1,4 +1,6 @@
 import os
+import asyncio
+import logging
 from flask import Flask, jsonify, request, send_from_directory
 from dotenv import load_dotenv
 import threading
@@ -19,13 +21,58 @@ from bot.roblox_api import (
 # Load environment variables
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('app')
+
 # Initialize Flask app
 app = Flask(__name__, static_folder='client/dist')
 
+# Log startup information
+logger.info("Starting BloxHub Discord Bot application")
+logger.info(f"DISCORD_BOT_TOKEN present: {bool(os.environ.get('DISCORD_BOT_TOKEN'))}")
+logger.info(f"DATABASE_URL present: {bool(os.environ.get('DATABASE_URL'))}")
+
 # Initialize Discord bot in a separate thread
-bot_thread = threading.Thread(target=initialize_bot)
-bot_thread.daemon = True
-bot_thread.start()
+async def start_bot():
+    """
+    Start the Discord bot and ensure it's properly logged in
+    """
+    try:
+        logger = logging.getLogger('discord-bot')
+        logger.info("Starting Discord bot...")
+        # Create and start bot thread
+        bot_future = asyncio.ensure_future(initialize_bot())
+        return bot_future
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+        return None
+
+# Set up the event loop for the bot
+if not os.environ.get('DISCORD_BOT_TOKEN'):
+    print("WARNING: DISCORD_BOT_TOKEN not set. Bot will not start.")
+else:
+    # Run the bot initialization in a background task
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    bot_future = loop.run_until_complete(start_bot())
+    
+    # Create a separate thread to run the loop
+    def run_bot_loop():
+        try:
+            loop.run_forever()
+        except Exception as e:
+            print(f"Bot loop error: {e}")
+        finally:
+            loop.close()
+    
+    bot_thread = threading.Thread(target=run_bot_loop)
+    bot_thread.daemon = True
+    bot_thread.start()
+    print("Discord bot started in background thread")
 
 # API routes
 @app.route('/api/products', methods=['GET'])
