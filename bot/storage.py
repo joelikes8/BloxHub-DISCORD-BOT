@@ -52,8 +52,7 @@ class VerifiedUser(Base):
     verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
-    # Relationships
-    purchases = relationship("Purchase", back_populates="verified_user")
+    # We'll define the relationship from Purchase side only for simplicity
     
     def to_dict(self):
         return {
@@ -106,10 +105,7 @@ class Purchase(Base):
     
     # Relationships
     product = relationship("Product", back_populates="purchases")
-    verified_user = relationship("VerifiedUser", back_populates="purchases", 
-                                foreign_keys=[discord_id], 
-                                primaryjoin="Purchase.discord_id == VerifiedUser.discord_id",
-                                viewonly=True)
+    # Remove the problematic relationship
     
     def to_dict(self):
         return {

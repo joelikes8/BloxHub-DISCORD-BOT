@@ -78,147 +78,36 @@ async def initialize_bot():
 # Register slash commands
 async def register_commands():
     try:
-        # Define commands
-        verify_command = app_commands.Command(
-            name="verify",
-            description="Link your Discord account to your Roblox profile",
-            callback=handle_verify_command,
-        )
-        verify_command.add_option(
-            app_commands.Option(
-                name="username",
-                description="Your Roblox username",
-                type=discord.AppCommandOptionType.string,
-                required=True
-            )
-        )
+        # Define commands using discord.py's newer approach
+        @bot.tree.command(name="verify", description="Link your Discord account to your Roblox profile")
+        async def verify(interaction: discord.Interaction, username: str):
+            await handle_verify_command(interaction, username)
         
-        confirm_command = app_commands.Command(
-            name="confirm",
-            description="Confirm your verification with your Roblox username",
-            callback=handle_confirm_verify_command,
-        )
-        confirm_command.add_option(
-            app_commands.Option(
-                name="username",
-                description="Your Roblox username",
-                type=discord.AppCommandOptionType.string,
-                required=True
-            )
-        )
+        @bot.tree.command(name="confirm", description="Confirm your verification with your Roblox username")
+        async def confirm(interaction: discord.Interaction, username: str):
+            await handle_confirm_verify_command(interaction, username)
         
-        reverify_command = app_commands.Command(
-            name="reverify",
-            description="Re-link your Discord account to a different Roblox profile",
-            callback=handle_reverify_command,
-        )
+        @bot.tree.command(name="reverify", description="Re-link your Discord account to a different Roblox profile")
+        async def reverify(interaction: discord.Interaction):
+            await handle_reverify_command(interaction)
         
-        buy_command = app_commands.Command(
-            name="buy",
-            description="Purchase a product with a gamepass",
-            callback=handle_buy_command,
-        )
-        buy_command.add_option(
-            app_commands.Option(
-                name="product",
-                description="The name of the product you want to buy",
-                type=discord.AppCommandOptionType.string,
-                required=True
-            )
-        )
+        @bot.tree.command(name="buy", description="Purchase a product with a gamepass")
+        async def buy(interaction: discord.Interaction, product: str):
+            await handle_buy_command(interaction, product)
         
-        redeem_command = app_commands.Command(
-            name="redeem",
-            description="Redeem a gamepass you already own",
-            callback=handle_redeem_command,
-        )
-        redeem_command.add_option(
-            app_commands.Option(
-                name="gamepass",
-                description="Link to the gamepass",
-                type=discord.AppCommandOptionType.string,
-                required=True
-            )
-        )
-        redeem_command.add_option(
-            app_commands.Option(
-                name="product",
-                description="Product name (optional)",
-                type=discord.AppCommandOptionType.string,
-                required=False
-            )
-        )
+        @bot.tree.command(name="redeem", description="Redeem a gamepass you already own")
+        async def redeem(interaction: discord.Interaction, gamepass: str, product: str = None):
+            await handle_redeem_command(interaction, gamepass, product)
         
-        add_command = app_commands.Command(
-            name="add",
-            description="Add a new product (Admin only)",
-            callback=handle_add_command,
-            default_permissions=discord.Permissions(administrator=True)
-        )
-        add_command.add_option(
-            app_commands.Option(
-                name="name",
-                description="Product name",
-                type=discord.AppCommandOptionType.string,
-                required=True
-            )
-        )
-        add_command.add_option(
-            app_commands.Option(
-                name="gamepass",
-                description="Link to the gamepass",
-                type=discord.AppCommandOptionType.string,
-                required=True
-            )
-        )
-        add_command.add_option(
-            app_commands.Option(
-                name="description",
-                description="Product description",
-                type=discord.AppCommandOptionType.string,
-                required=False
-            )
-        )
-        add_command.add_option(
-            app_commands.Option(
-                name="botinvite",
-                description="Bot invite link to send when redeemed",
-                type=discord.AppCommandOptionType.string,
-                required=False
-            )
-        )
+        @bot.tree.command(name="add", description="Add a new product (Admin only)")
+        @app_commands.default_permissions(administrator=True)
+        async def add(interaction: discord.Interaction, name: str, gamepass: str, description: str = None, botinvite: str = None):
+            await handle_add_command(interaction, name, gamepass, description, botinvite)
         
-        set_private_channels_command = app_commands.Command(
-            name="setprivatechannels",
-            description="Set a channel as private with access via gamepass link (Admin only)",
-            callback=handle_set_private_channels_command,
-            default_permissions=discord.Permissions(administrator=True)
-        )
-        set_private_channels_command.add_option(
-            app_commands.Option(
-                name="channel",
-                description="The channel to make private",
-                type=discord.AppCommandOptionType.channel,
-                required=True
-            )
-        )
-        set_private_channels_command.add_option(
-            app_commands.Option(
-                name="gamepass",
-                description="Link to the gamepass for access",
-                type=discord.AppCommandOptionType.string,
-                required=True
-            )
-        )
-        
-        # Register commands
-        bot.tree.add_command(verify_command)
-        bot.tree.add_command(confirm_command)
-        bot.tree.add_command(reverify_command)
-        bot.tree.add_command(buy_command)
-        bot.tree.add_command(redeem_command)
-        bot.tree.add_command(add_command)
-        bot.tree.add_command(set_private_channels_command)
+        @bot.tree.command(name="setprivatechannels", description="Set a channel as private with access via gamepass link (Admin only)")
+        @app_commands.default_permissions(administrator=True)
+        async def setprivatechannels(interaction: discord.Interaction, channel: discord.TextChannel, gamepass: str):
+            await handle_set_private_channels_command(interaction, channel, gamepass)
         
         # Sync commands
         guild = discord.Object(id=GUILD_ID)
@@ -481,15 +370,18 @@ async def check_pending_purchases():
         logger.info(f"Checking {len(pending_purchases)} pending purchases...")
         
         for purchase in pending_purchases:
-            product = storage.get_product(purchase['id'])
+            product = storage.get_product(purchase['productId'])
             if not product:
-                await storage.update_purchase(purchase['id'], {'status': 'failed'})
+                # Fix: No need to await synchronous method
+                storage.update_purchase(purchase['id'], {'status': 'failed'})
                 continue
             
-            owned = await user_owns_gamepass(purchase['robloxId'], product['gamepassId'])
+            # Convert to async call with await
+            owned = await asyncio.to_thread(user_owns_gamepass, purchase['robloxId'], product['gamepassId'])
             
             if owned:
-                await storage.update_purchase(
+                # Fix: No need to await synchronous method
+                storage.update_purchase(
                     purchase['id'], 
                     {
                         'status': 'completed',
